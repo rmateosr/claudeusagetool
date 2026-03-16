@@ -322,7 +322,7 @@ function Click-RefreshButton {
     $cts = [System.Threading.CancellationTokenSource]::new(5000)
     try {
         $ws.ConnectAsync([Uri]$WsUrl, $cts.Token).Wait()
-        $js    = "var b = document.evaluate(""/html/body/div[2]/div/div[2]/div[3]/main/div/div/div/section[1]/div[5]/div/button"", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; if (b) { b.click(); 'clicked' } else { 'not found' }"
+        $js    = "var b = document.querySelector('button[aria-label=""Refresh usage limits""]'); if (b) { b.click(); 'clicked' } else { 'not found' }"
         $req   = "{`"id`":1,`"method`":`"Runtime.evaluate`",`"params`":{`"expression`":`"$($js -replace '"','\"')`"}}"
         $bytes = [Text.Encoding]::UTF8.GetBytes($req)
         $ws.SendAsync([ArraySegment[byte]]$bytes, [Net.WebSockets.WebSocketMessageType]::Text, $true, $cts.Token).Wait()
