@@ -1,43 +1,28 @@
-# Claude Usage Tool
+# Claude Usage Monitor
 
-A compact always-on-top popup that shows real-time Claude usage stats (session and weekly limits) for multiple Claude accounts simultaneously.
+Tracks Claude AI usage across multiple accounts in a compact always-on-top popup.
 
----
+**Requires:** Google Chrome installed on Windows.
 
-## One-time setup
+## Quick start
 
-**1. Allow PowerShell scripts to run:**
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
-```
+1. Double-click `Claude_Usage_Monitor.bat`
+2. Click **Add Account** for each Claude account you want to track
+3. Log in when Chrome opens, then click OK
+4. Click **Start Monitoring** — usage stats refresh every 30 seconds
 
-**2. Run the setup wizard:**
-```powershell
-cd "$env:USERPROFILE\Documents\claudeusagetool"
-.\setup.ps1
-```
+## What it does
 
-The wizard will:
-- Ask how many Claude accounts you want to track (1–9)
-- Launch a Chrome window for each account so you can log in
-- Save your configuration to `config.json`
+- Launches isolated Chrome profiles (one per account) to scrape usage data from `claude.ai/settings/usage`
+- Displays session and weekly usage percentages in a small always-on-top window
+- Color-coded status: green (low usage), orange (moderate), red (near limit)
+- Auto-refreshes every 30 seconds
 
-You only need to do this once. Chrome sessions are saved — you won't need to log in again.
+## Files
 
----
+| File | Purpose |
+|------|---------|
+| `claude-usage-monitor.ps1` | The tool (auditable PowerShell source) |
+| `Claude_Usage_Monitor.bat` | Double-click launcher (handles ExecutionPolicy) |
 
-## Every time you want to use it
-
-```powershell
-cd "$env:USERPROFILE\Documents\claudeusagetool"
-.\claude-usage-popup.ps1
-```
-
-This launches a small always-on-top popup in the corner of your screen showing live usage stats for each account. It refreshes automatically every 30 seconds and has a manual Refresh button.
-
----
-
-## Troubleshooting
-
-- Chrome must be installed at `C:\Program Files\Google\Chrome\Application\chrome.exe` — if yours is elsewhere, re-run `setup.ps1` and enter the correct path when prompted
-- If an account shows "Not logged in", re-run `setup.ps1` and log in again for that account
+No binaries, no installers, no dependencies beyond Chrome. Read the `.ps1` to see exactly what it does.

@@ -1,4 +1,7 @@
+config.json
+*.exe
+CLAUDE.md
+PACKAGING_PLAN.md
 REPORT.md
 SESSION_NOTES.md
 progress_*.md
-config.json
