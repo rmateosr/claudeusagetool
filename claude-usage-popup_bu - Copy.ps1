@@ -1,20 +1,12 @@
-﻿# ABOUTME: Compact always-on-top popup showing Claude usage stats for multiple accounts
+﻿# ABOUTME: Compact always-on-top popup showing Claude usage stats for 3 accounts
 # ABOUTME: Manages Chrome via DevTools Protocol to extract data from logged-in profiles
 
 param(
-    [int]$RefreshSeconds = 30,
-    [string]$Url         = "https://claude.ai/settings/usage"
+    [string]$ChromePath   = "C:\Program Files\Google\Chrome\Application\chrome.exe",
+    [string]$ProfilesRoot = "$env:LOCALAPPDATA\ClaudeProfiles",
+    [int]$RefreshSeconds  = 30,
+    [string]$Url          = "https://claude.ai/settings/usage"
 )
-
-$configPath = Join-Path $PSScriptRoot "config.json"
-if (-not (Test-Path $configPath)) {
-    Write-Error "config.json not found. Run setup.ps1 first."
-    exit 1
-}
-$Config       = Get-Content $configPath -Raw | ConvertFrom-Json
-$ChromePath   = $Config.chromePath
-$ProfilesRoot = $Config.profilesRoot
-$Accounts     = $Config.accounts
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -41,7 +33,7 @@ public class WinApi {
 }
 "@
 
-$Script:Ports      = @($Accounts | ForEach-Object { $_.port })
+$Script:Ports      = @(9222, 9223, 9224)
 $Script:OwnedProcs = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
 $Script:LogFile    = "$env:TEMP\claude-popup.log"
 "" | Out-File $Script:LogFile
@@ -54,7 +46,7 @@ function Write-Log {
 # ------------ Chrome management ------------
 
 function Kill-ChromeForProfile {
-    param([string]$Folder)
+    param([int]$Idx)
     $killed = 0
     # Enumerate via Get-Process (reliable) then query each PID via WMI for CommandLine
     $chromeProcs = @(Get-Process -Name chrome -ErrorAction SilentlyContinue)
@@ -65,32 +57,32 @@ function Kill-ChromeForProfile {
             $cmd = $wmi.CommandLine
             $short = if ($cmd) { $cmd.Substring(0, [Math]::Min(200, $cmd.Length)) } else { 'NULL' }
             Write-Log "  PID $($p.Id) title='$($p.MainWindowTitle)' cmd=$short"
-            if ($cmd -and $cmd -like "*$Folder*") {
+            if ($cmd -and $cmd -like "*Account$Idx*") {
                 Write-Log "  -> killing PID $($p.Id)"
                 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
                 $killed++
             }
         } catch { Write-Log "  PID $($p.Id) query error: $_" }
     }
-    Write-Log "Kill scan done: killed $killed process(es) for $Folder"
+    Write-Log "Kill scan done: killed $killed process(es) for Account${Idx}"
     return $killed
 }
 
 function Start-DebugChrome {
-    param([PSCustomObject]$Account)
-    $port = $Account.port
-    $dir  = "$ProfilesRoot\$($Account.folder)"
+    param([int]$Idx)
+    $port = $Script:Ports[$Idx - 1]
+    $dir  = "$ProfilesRoot\Account$Idx"
 
     # Reuse if a debug-enabled Chrome is already running on this port
     try {
         Invoke-RestMethod "http://127.0.0.1:$port/json" -TimeoutSec 1 -ErrorAction Stop | Out-Null
-        Write-Log "$($Account.folder): debug port $port already active - reusing"
+        Write-Log "Account${Idx}: debug port $port already active - reusing"
         return
     } catch {
-        Write-Log "$($Account.folder): port $port not active, will kill and relaunch"
+        Write-Log "Account${Idx}: port $port not active, will kill and relaunch"
     }
 
-    Kill-ChromeForProfile -Folder $Account.folder | Out-Null
+    Kill-ChromeForProfile -Idx $Idx | Out-Null
     Start-Sleep -Milliseconds 1000
 
     $proc = Start-Process $ChromePath -PassThru -ArgumentList `
@@ -101,7 +93,7 @@ function Start-DebugChrome {
         "--disable-session-crashed-bubble",
         "--hide-crash-restore-bubble",
         $Url
-    Write-Log "$($Account.folder): launched Chrome PID $($proc.Id) on debug port $port"
+    Write-Log "Account${Idx}: launched Chrome PID $($proc.Id) on debug port $port"
     $Script:OwnedProcs.Add($proc)
 }
 
@@ -181,9 +173,10 @@ function Read-PageText {
 # ------------ Data parsing ------------
 
 function Parse-AccountInfo {
-    param([string]$Text, [string]$Name)
+    param([string]$Text, [int]$Num)
 
-    $base = $Name
+    $names = @("claudeA-raulnmateos", "claudeB-rmateos.1", "claudeN-rmateosr")
+    $base  = $names[$Num - 1]
 
     if (-not $Text) {
         return @{ Header = "$base"; Session = ""; Weekly = ""; SessionReset = ""; WeeklyReset = ""; Color = [Drawing.Color]::DimGray }
@@ -272,20 +265,22 @@ $form = [Windows.Forms.Form]@{
     ForeColor       = [Drawing.Color]::White
     StartPosition   = 'Manual'
 }
-$form.ClientSize = [Drawing.Size]::new($W, $PAD + $Accounts.Count * $ROW_H + 8 + 28 + $PAD)
+$form.ClientSize = [Drawing.Size]::new($W, $PAD + 3 * $ROW_H + 8 + 28 + $PAD)
 $wa = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $form.Location = [Drawing.Point]::new($wa.Right - $W - 10, $wa.Top + 10)
 
 $Rows = @()
+$AccountNames = @("claudeA-raulnmateos", "claudeB-rmateos.1", "claudeN-rmateosr")
+$Script:DisplayPorts = @(9223, 9224, 9222)
 
-for ($i = 0; $i -lt $Accounts.Count; $i++) {
+for ($i = 0; $i -lt 3; $i++) {
     $y = $PAD + $i * $ROW_H
 
     $lH = [Windows.Forms.Label]@{
         Size     = [Drawing.Size]::new($W - 2*$PAD, 22)
         Location = [Drawing.Point]::new($PAD, $y)
         Font     = [Drawing.Font]::new("Segoe UI", 10, [Drawing.FontStyle]::Bold)
-        Text     = "$($Accounts[$i].name)  -  Starting..."
+        Text     = "$($AccountNames[$i])  -  Starting..."
     }
 
     $lS = [Windows.Forms.Label]@{
@@ -314,7 +309,7 @@ for ($i = 0; $i -lt $Accounts.Count; $i++) {
 
     foreach ($c in @($lH, $lS, $lW, $lR)) { $form.Controls.Add($c) }
 
-    if ($i -lt $Accounts.Count - 1) {
+    if ($i -lt 2) {
         $sep = [Windows.Forms.Panel]@{
             Size      = [Drawing.Size]::new($W - 2*$PAD, 1)
             Location  = [Drawing.Point]::new($PAD, $y + $ROW_H - 2)
@@ -326,7 +321,7 @@ for ($i = 0; $i -lt $Accounts.Count; $i++) {
     $Rows += @{ H = $lH; S = $lS; W = $lW; R = $lR }
 }
 
-$yBot = $PAD + $Accounts.Count * $ROW_H + 8
+$yBot = $PAD + 3 * $ROW_H + 8
 
 $btnRefresh = [Windows.Forms.Button]@{
     Text      = "Refresh"
@@ -353,10 +348,10 @@ $form.Controls.Add($lblStatus)
 function Invoke-Refresh {
     $lblStatus.Text = "Refreshing..."
     $form.Refresh()
-    for ($i = 0; $i -lt $Accounts.Count; $i++) {
-        $pg = Get-UsagePage -Port $Accounts[$i].port
+    for ($i = 0; $i -lt 3; $i++) {
+        $pg = Get-UsagePage -Port $Script:DisplayPorts[$i]
         if (-not $pg) {
-            $Rows[$i].H.Text      = "$($Accounts[$i].name)  -  Chrome not ready"
+            $Rows[$i].H.Text      = "$($AccountNames[$i])  -  Chrome not ready"
             $Rows[$i].H.ForeColor = [Drawing.Color]::DimGray
             $Rows[$i].S.Text = ""; $Rows[$i].W.Text = ""; $Rows[$i].R.Text = ""
             continue
@@ -364,8 +359,8 @@ function Invoke-Refresh {
         Click-RefreshButton -WsUrl $pg.webSocketDebuggerUrl
         Start-Sleep -Seconds 3
         $txt  = Read-PageText -WsUrl $pg.webSocketDebuggerUrl
-        Write-Log "$($Accounts[$i].name) text (first 500): $($txt.Substring(0, [Math]::Min(500, $txt.Length)))"
-        $info = Parse-AccountInfo -Text $txt -Name $Accounts[$i].name
+        Write-Log "Account $($i+1) text (first 500): $($txt.Substring(0, [Math]::Min(500, $txt.Length)))"
+        $info = Parse-AccountInfo -Text $txt -Num ($i + 1)
 
         $Rows[$i].H.Text      = $info.Header
         $Rows[$i].H.ForeColor = $info.Color
@@ -401,7 +396,7 @@ $btnRefresh.Add_Click({ Invoke-Refresh })
 $form.Add_Shown({
     $lblStatus.Text = "Starting Chrome..."
     $form.Refresh()
-    foreach ($acct in $Accounts) { Start-DebugChrome -Account $acct }
+    1..3 | ForEach-Object { Start-DebugChrome -Idx $_ }
     $lblStatus.Text = "Loading pages..."
     $form.Refresh()
     $initTimer.Start()

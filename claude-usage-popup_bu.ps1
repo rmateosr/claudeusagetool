@@ -211,14 +211,32 @@ function Parse-AccountInfo {
         if ($Text -match '(\d+)%') { $weekly = "$($Matches[1])%" }
     }
 
-    # Reset times — session uses a countdown ("Resets in X hr Y min"), weekly uses day+time
+    # Reset times — both session and weekly can use countdown format ("Resets in X hr Y min")
+    # when the reset is < 24h away; otherwise weekly shows day+time ("Resets Fri 1:00 PM")
     $sessionReset = ""
     $weeklyReset  = ""
-    if ($Text -match 'Resets in ([\d\w\s]+(?:hr|min)[^\n\r]*)') {
-        $sessionReset = "Resets in $($Matches[1].Trim())"
-    }
-    if ($Text -match 'Resets (\w+)(?:\s+at)?\s+(\d+:\d+ [AP]M)') {
-        $weeklyReset = "Resets $($Matches[1]) $($Matches[2])"
+    # Find positions of section headers to assign resets correctly
+    $weeklyPos = -1
+    $sessionPos = -1
+    $wm = [regex]::Match($Text, '(?i)weekly\s+(limit|usage)')
+    if ($wm.Success) { $weeklyPos = $wm.Index }
+    $sm = [regex]::Match($Text, '(?i)session\s+(limit|usage|capacity)')
+    if ($sm.Success) { $sessionPos = $sm.Index }
+    # Match all "Resets ..." lines (both countdown and day+time formats)
+    $allResetMatches = [regex]::Matches($Text, 'Resets\s+(in\s+[\d\w\s]+(?:hr|min)[^\n\r]*|(?!in\b)[^\n\r]+)')
+    foreach ($rm in $allResetMatches) {
+        $resetText = "Resets $($rm.Groups[1].Value.Trim())"
+        $pos = $rm.Index
+        # Assign to weekly or session based on which section header precedes this match
+        if ($weeklyPos -ge 0 -and $pos -gt $weeklyPos -and ($sessionPos -lt 0 -or $weeklyPos -gt $sessionPos -or $pos -lt $sessionPos)) {
+            if (-not $weeklyReset) { $weeklyReset = $resetText }
+        } elseif ($sessionPos -ge 0 -and $pos -gt $sessionPos -and ($weeklyPos -lt 0 -or $sessionPos -gt $weeklyPos -or $pos -lt $weeklyPos)) {
+            if (-not $sessionReset) { $sessionReset = $resetText }
+        } else {
+            # Fallback: if we can't determine section, assign first to session, rest to weekly
+            if (-not $sessionReset) { $sessionReset = $resetText }
+            elseif (-not $weeklyReset) { $weeklyReset = $resetText }
+        }
     }
 
     # Status and color
@@ -358,9 +376,11 @@ function Invoke-Refresh {
         $Rows[$i].H.ForeColor = $info.Color
         $sLine = if ($info.Session) { "Session:  $($info.Session)" } else { "" }
         if ($sLine -and $info.SessionReset) { $sLine += "   $($info.SessionReset)" }
+        elseif (-not $sLine -and $info.SessionReset) { $sLine = "Session:  $($info.SessionReset)" }
         $Rows[$i].S.Text = $sLine
         $wLine = if ($info.Weekly) { "Weekly:   $($info.Weekly)" } else { "" }
         if ($wLine -and $info.WeeklyReset) { $wLine += "   $($info.WeeklyReset)" }
+        elseif (-not $wLine -and $info.WeeklyReset) { $wLine = "Weekly:   $($info.WeeklyReset)" }
         $Rows[$i].W.Text = $wLine
         $Rows[$i].R.Text = ""
     }
