@@ -40,8 +40,126 @@ $Script:LogFile       = "$env:TEMP\claude-monitor.log"
 $Script:ChromePath    = $Script:DefaultChrome
 $Script:Accounts      = @()
 $Script:OwnedProcs    = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
+$Script:Settings      = $null
+$Script:Theme         = $null
 
 "" | Out-File $Script:LogFile
+
+# ------------ Theme infrastructure ------------
+
+$Script:DefaultSettings = @{
+    mode         = "dark"
+    colorPreset  = "default"
+    customColors = @{
+        low       = "#32CD32"
+        mid       = "#FFA500"
+        high      = "#FF4500"
+        exhausted = "#808080"
+    }
+}
+
+$Script:ColorPresets = @{
+    default = @{
+        low       = [Drawing.Color]::LimeGreen
+        mid       = [Drawing.Color]::Orange
+        high      = [Drawing.Color]::OrangeRed
+        exhausted = [Drawing.Color]::Gray
+    }
+    colorblind = @{
+        low       = [Drawing.Color]::DodgerBlue
+        mid       = [Drawing.Color]::Gold
+        high      = [Drawing.Color]::DarkOrange
+        exhausted = [Drawing.Color]::Gray
+    }
+}
+
+function Color-FromHex {
+    param([string]$Hex)
+    $Hex = $Hex.TrimStart('#')
+    $r = [Convert]::ToInt32($Hex.Substring(0,2), 16)
+    $g = [Convert]::ToInt32($Hex.Substring(2,2), 16)
+    $b = [Convert]::ToInt32($Hex.Substring(4,2), 16)
+    return [Drawing.Color]::FromArgb($r, $g, $b)
+}
+
+function Color-ToHex {
+    param([Drawing.Color]$Color)
+    return "#{0:X2}{1:X2}{2:X2}" -f $Color.R, $Color.G, $Color.B
+}
+
+function Copy-DefaultSettings {
+    $d = $Script:DefaultSettings
+    return @{
+        mode         = $d.mode
+        colorPreset  = $d.colorPreset
+        customColors = @{
+            low       = $d.customColors.low
+            mid       = $d.customColors.mid
+            high      = $d.customColors.high
+            exhausted = $d.customColors.exhausted
+        }
+    }
+}
+
+function Build-Theme {
+    param([hashtable]$Settings)
+    if ($Settings.mode -eq "light") {
+        $chrome = @{
+            FormBg        = [Drawing.Color]::FromArgb(240, 240, 240)
+            PanelBg       = [Drawing.Color]::White
+            ButtonBg      = [Drawing.Color]::FromArgb(220, 220, 220)
+            InputBg       = [Drawing.Color]::White
+            SeparatorBg   = [Drawing.Color]::FromArgb(200, 200, 200)
+            TextPrimary   = [Drawing.Color]::FromArgb(20, 20, 20)
+            TextSecondary = [Drawing.Color]::FromArgb(80, 80, 80)
+            TextDim       = [Drawing.Color]::FromArgb(140, 140, 140)
+            TextMuted     = [Drawing.Color]::FromArgb(160, 160, 160)
+            StartButtonBg = [Drawing.Color]::FromArgb(0, 140, 90)
+            StartButtonFg = [Drawing.Color]::White
+        }
+    } else {
+        $chrome = @{
+            FormBg        = [Drawing.Color]::FromArgb(22, 22, 22)
+            PanelBg       = [Drawing.Color]::FromArgb(36, 36, 36)
+            ButtonBg      = [Drawing.Color]::FromArgb(48, 48, 48)
+            InputBg       = [Drawing.Color]::FromArgb(48, 48, 48)
+            SeparatorBg   = [Drawing.Color]::FromArgb(42, 42, 42)
+            TextPrimary   = [Drawing.Color]::White
+            TextSecondary = [Drawing.Color]::Silver
+            TextDim       = [Drawing.Color]::DimGray
+            TextMuted     = [Drawing.Color]::FromArgb(100, 100, 100)
+            StartButtonBg = [Drawing.Color]::FromArgb(0, 120, 80)
+            StartButtonFg = [Drawing.Color]::White
+        }
+    }
+
+    $preset = $Settings.colorPreset
+    if ($preset -eq "custom") {
+        $cc = $Settings.customColors
+        $usage = @{
+            low       = Color-FromHex $cc.low
+            mid       = Color-FromHex $cc.mid
+            high      = Color-FromHex $cc.high
+            exhausted = Color-FromHex $cc.exhausted
+        }
+    } elseif ($Script:ColorPresets.ContainsKey($preset)) {
+        $usage = $Script:ColorPresets[$preset]
+    } else {
+        $usage = $Script:ColorPresets['default']
+    }
+
+    $theme = @{}
+    foreach ($k in $chrome.Keys) { $theme[$k] = $chrome[$k] }
+    $theme['UsageLow']     = $usage.low
+    $theme['UsageMid']     = $usage.mid
+    $theme['UsageHigh']    = $usage.high
+    $theme['UsageExhaust'] = $usage.exhausted
+    return $theme
+}
+
+function Apply-Settings {
+    $Script:Theme = Build-Theme -Settings $Script:Settings
+}
 
 # ------------ Logging ------------
 
@@ -58,11 +176,28 @@ function Load-Config {
         $Script:ChromePath   = $raw.chromePath
         $Script:ProfilesRoot = $raw.profilesRoot
         $Script:Accounts     = @($raw.accounts)
+        if ($raw.settings) {
+            $s = $raw.settings
+            $Script:Settings = @{
+                mode         = if ($s.mode) { $s.mode } else { "dark" }
+                colorPreset  = if ($s.colorPreset) { $s.colorPreset } else { "default" }
+                customColors = @{
+                    low       = if ($s.customColors -and $s.customColors.low) { $s.customColors.low } else { "#32CD32" }
+                    mid       = if ($s.customColors -and $s.customColors.mid) { $s.customColors.mid } else { "#FFA500" }
+                    high      = if ($s.customColors -and $s.customColors.high) { $s.customColors.high } else { "#FF4500" }
+                    exhausted = if ($s.customColors -and $s.customColors.exhausted) { $s.customColors.exhausted } else { "#808080" }
+                }
+            }
+        } else {
+            $Script:Settings = Copy-DefaultSettings
+        }
     } else {
         $Script:ChromePath   = $Script:DefaultChrome
         $Script:ProfilesRoot = "$env:LOCALAPPDATA\ClaudeProfiles"
         $Script:Accounts     = @()
+        $Script:Settings     = Copy-DefaultSettings
     }
+    Apply-Settings
 }
 
 function Save-Config {
@@ -70,8 +205,18 @@ function Save-Config {
         chromePath   = $Script:ChromePath
         profilesRoot = $Script:ProfilesRoot
         accounts     = @($Script:Accounts)
+        settings     = [ordered]@{
+            mode         = $Script:Settings.mode
+            colorPreset  = $Script:Settings.colorPreset
+            customColors = [ordered]@{
+                low       = $Script:Settings.customColors.low
+                mid       = $Script:Settings.customColors.mid
+                high      = $Script:Settings.customColors.high
+                exhausted = $Script:Settings.customColors.exhausted
+            }
+        }
     }
-    $cfg | ConvertTo-Json -Depth 3 | Out-File $Script:ConfigPath -Encoding utf8
+    $cfg | ConvertTo-Json -Depth 5 | Out-File $Script:ConfigPath -Encoding utf8
 }
 
 function Get-NextPort {
@@ -216,18 +361,19 @@ function Read-PageText {
 function Parse-AccountInfo {
     param([string]$Text, [string]$Name)
 
+    $T    = $Script:Theme
     $base = $Name
 
     if (-not $Text) {
-        return @{ Header = "$base"; Session = ""; Weekly = ""; SessionReset = ""; WeeklyReset = ""; Color = [Drawing.Color]::DimGray }
+        return @{ Header = "$base"; Session = ""; Weekly = ""; SessionReset = ""; WeeklyReset = ""; Color = $T.TextDim }
     }
 
     if ($Text -match '(Sign in|Log in|Create account)' -and $Text -notmatch '\d+% used') {
-        return @{ Header = "$base  -  Not logged in"; Session = ""; Weekly = ""; SessionReset = ""; WeeklyReset = ""; Color = [Drawing.Color]::OrangeRed }
+        return @{ Header = "$base  -  Not logged in"; Session = ""; Weekly = ""; SessionReset = ""; WeeklyReset = ""; Color = $T.UsageHigh }
     }
 
     if ($Text -notmatch '\d+%') {
-        return @{ Header = "$base  -  Loading..."; Session = ""; Weekly = ""; SessionReset = ""; WeeklyReset = ""; Color = [Drawing.Color]::Gray }
+        return @{ Header = "$base  -  Loading..."; Session = ""; Weekly = ""; SessionReset = ""; WeeklyReset = ""; Color = $T.UsageExhaust }
     }
 
     $session = ""
@@ -270,20 +416,20 @@ function Parse-AccountInfo {
         }
     }
 
-    $color  = [Drawing.Color]::LimeGreen
+    $color  = $T.UsageLow
     $status = ""
     if ($Text -match "You.ve hit your weekly limit") {
         $status = "Limit reached"
-        $color  = [Drawing.Color]::OrangeRed
+        $color  = $T.UsageHigh
     } elseif ($Text -match "You.re now using extra usage") {
         $status = "Extra usage"
-        $color  = [Drawing.Color]::Orange
+        $color  = $T.UsageMid
     } elseif ($session -or $weekly) {
         $p = if ($session) { [int]($session -replace '%', '') } else { 0 }
-        $color = if ($p -eq 100)   { [Drawing.Color]::Gray }
-                 elseif ($p -ge 90) { [Drawing.Color]::OrangeRed }
-                 elseif ($p -ge 50) { [Drawing.Color]::Orange }
-                 else               { [Drawing.Color]::LimeGreen }
+        $color = if ($p -eq 100)   { $T.UsageExhaust }
+                 elseif ($p -ge 90) { $T.UsageHigh }
+                 elseif ($p -ge 50) { $T.UsageMid }
+                 else               { $T.UsageLow }
     }
 
     $header = if ($status) { "$base  -  $status" } else { $base }
@@ -298,14 +444,15 @@ function Show-InputDialog {
         [string]$Prompt,
         [string]$Default = ""
     )
+    $T = $Script:Theme
     $dlg = [Windows.Forms.Form]@{
         Text            = $Title
         FormBorderStyle = 'FixedDialog'
         MaximizeBox     = $false
         MinimizeBox     = $false
         StartPosition   = 'CenterScreen'
-        BackColor       = [Drawing.Color]::FromArgb(30, 30, 30)
-        ForeColor       = [Drawing.Color]::White
+        BackColor       = $T.FormBg
+        ForeColor       = $T.TextPrimary
         ClientSize      = [Drawing.Size]::new(350, 130)
     }
     $lbl = [Windows.Forms.Label]@{
@@ -319,8 +466,8 @@ function Show-InputDialog {
         Location  = [Drawing.Point]::new(12, 38)
         Size      = [Drawing.Size]::new(326, 24)
         Font      = [Drawing.Font]::new("Segoe UI", 9)
-        BackColor = [Drawing.Color]::FromArgb(48, 48, 48)
-        ForeColor = [Drawing.Color]::White
+        BackColor = $T.InputBg
+        ForeColor = $T.TextPrimary
     }
     $btnOk = [Windows.Forms.Button]@{
         Text         = "OK"
@@ -328,8 +475,8 @@ function Show-InputDialog {
         Location     = [Drawing.Point]::new(178, 90)
         Size         = [Drawing.Size]::new(75, 28)
         FlatStyle    = 'Flat'
-        BackColor    = [Drawing.Color]::FromArgb(48, 48, 48)
-        ForeColor    = [Drawing.Color]::White
+        BackColor    = $T.ButtonBg
+        ForeColor    = $T.TextPrimary
     }
     $btnCancel = [Windows.Forms.Button]@{
         Text         = "Cancel"
@@ -337,8 +484,8 @@ function Show-InputDialog {
         Location     = [Drawing.Point]::new(263, 90)
         Size         = [Drawing.Size]::new(75, 28)
         FlatStyle    = 'Flat'
-        BackColor    = [Drawing.Color]::FromArgb(48, 48, 48)
-        ForeColor    = [Drawing.Color]::White
+        BackColor    = $T.ButtonBg
+        ForeColor    = $T.TextPrimary
     }
     $dlg.AcceptButton = $btnOk
     $dlg.CancelButton = $btnCancel
@@ -352,20 +499,261 @@ function Show-InputDialog {
     return $null
 }
 
+# ------------ Settings dialog ------------
+
+function Show-Settings {
+    # Returns $true if settings were changed, $false otherwise
+    $T = $Script:Theme
+
+    $dlg = [Windows.Forms.Form]@{
+        Text            = "Settings"
+        FormBorderStyle = 'FixedDialog'
+        MaximizeBox     = $false
+        MinimizeBox     = $false
+        StartPosition   = 'CenterScreen'
+        BackColor       = $T.FormBg
+        ForeColor       = $T.TextPrimary
+        ClientSize      = [Drawing.Size]::new(320, 360)
+    }
+
+    # --- Mode section ---
+    $y = 14
+    $lblMode = [Windows.Forms.Label]@{
+        Text     = "Mode"
+        Location = [Drawing.Point]::new(12, $y)
+        Size     = [Drawing.Size]::new(296, 20)
+        Font     = [Drawing.Font]::new("Segoe UI", 10, [Drawing.FontStyle]::Bold)
+    }
+    $y += 24
+
+    $modePanel = [Windows.Forms.Panel]@{
+        Location  = [Drawing.Point]::new(12, $y)
+        Size      = [Drawing.Size]::new(296, 26)
+        BackColor = $T.FormBg
+    }
+    $rbDark = [Windows.Forms.RadioButton]@{
+        Text      = "Dark"
+        Location  = [Drawing.Point]::new(8, 2)
+        Size      = [Drawing.Size]::new(80, 22)
+        Font      = [Drawing.Font]::new("Segoe UI", 9)
+        ForeColor = $T.TextPrimary
+        Checked   = ($Script:Settings.mode -eq "dark")
+    }
+    $rbLight = [Windows.Forms.RadioButton]@{
+        Text      = "Light"
+        Location  = [Drawing.Point]::new(100, 2)
+        Size      = [Drawing.Size]::new(80, 22)
+        Font      = [Drawing.Font]::new("Segoe UI", 9)
+        ForeColor = $T.TextPrimary
+        Checked   = ($Script:Settings.mode -eq "light")
+    }
+    $modePanel.Controls.Add($rbDark)
+    $modePanel.Controls.Add($rbLight)
+    $y += 36
+
+    # --- Color Preset section ---
+    $lblPreset = [Windows.Forms.Label]@{
+        Text     = "Color Preset"
+        Location = [Drawing.Point]::new(12, $y)
+        Size     = [Drawing.Size]::new(296, 20)
+        Font     = [Drawing.Font]::new("Segoe UI", 10, [Drawing.FontStyle]::Bold)
+    }
+    $y += 24
+
+    $presetPanel = [Windows.Forms.Panel]@{
+        Location  = [Drawing.Point]::new(12, $y)
+        Size      = [Drawing.Size]::new(296, 52)
+        BackColor = $T.FormBg
+    }
+    $rbDefault = [Windows.Forms.RadioButton]@{
+        Text      = "Default"
+        Location  = [Drawing.Point]::new(8, 2)
+        Size      = [Drawing.Size]::new(90, 22)
+        Font      = [Drawing.Font]::new("Segoe UI", 9)
+        ForeColor = $T.TextPrimary
+        Checked   = ($Script:Settings.colorPreset -eq "default")
+    }
+    $rbColorblind = [Windows.Forms.RadioButton]@{
+        Text      = "Colorblind-safe"
+        Location  = [Drawing.Point]::new(100, 2)
+        Size      = [Drawing.Size]::new(140, 22)
+        Font      = [Drawing.Font]::new("Segoe UI", 9)
+        ForeColor = $T.TextPrimary
+        Checked   = ($Script:Settings.colorPreset -eq "colorblind")
+    }
+    $rbCustom = [Windows.Forms.RadioButton]@{
+        Text      = "Custom"
+        Location  = [Drawing.Point]::new(8, 28)
+        Size      = [Drawing.Size]::new(90, 22)
+        Font      = [Drawing.Font]::new("Segoe UI", 9)
+        ForeColor = $T.TextPrimary
+        Checked   = ($Script:Settings.colorPreset -eq "custom")
+    }
+    $presetPanel.Controls.Add($rbDefault)
+    $presetPanel.Controls.Add($rbColorblind)
+    $presetPanel.Controls.Add($rbCustom)
+    $y += 62
+
+    # --- Custom Colors section ---
+    $lblCustom = [Windows.Forms.Label]@{
+        Text      = "Custom Colors"
+        Location  = [Drawing.Point]::new(12, $y)
+        Size      = [Drawing.Size]::new(296, 20)
+        Font      = [Drawing.Font]::new("Segoe UI", 10, [Drawing.FontStyle]::Bold)
+        ForeColor = if ($rbCustom.Checked) { $T.TextPrimary } else { $T.TextDim }
+    }
+    $y += 24
+
+    $colorEntries = @(
+        @{ key = "low";       label = "Low usage (<50%)" }
+        @{ key = "mid";       label = "Mid usage (50-89%)" }
+        @{ key = "high";      label = "High usage (>=90%)" }
+        @{ key = "exhausted"; label = "Exhausted (100%)" }
+    )
+
+    $colorButtons = @{}
+    $colorLabels  = @{}
+    foreach ($entry in $colorEntries) {
+        $initColor = Color-FromHex $Script:Settings.customColors[$entry.key]
+        $btn = [Windows.Forms.Button]@{
+            Size      = [Drawing.Size]::new(28, 22)
+            Location  = [Drawing.Point]::new(20, $y)
+            FlatStyle = 'Flat'
+            BackColor = $initColor
+            Text      = ""
+            Enabled   = $rbCustom.Checked
+        }
+        $btn.FlatAppearance.BorderColor = $T.TextSecondary
+        $btn.FlatAppearance.BorderSize  = 1
+
+        $lbl = [Windows.Forms.Label]@{
+            Text      = $entry.label
+            Location  = [Drawing.Point]::new(56, $y + 3)
+            Size      = [Drawing.Size]::new(240, 20)
+            Font      = [Drawing.Font]::new("Segoe UI", 9)
+            ForeColor = if ($rbCustom.Checked) { $T.TextPrimary } else { $T.TextDim }
+        }
+
+        $btn.Add_Click({
+            param($sender, $e)
+            $cd = [Windows.Forms.ColorDialog]@{ Color = $sender.BackColor; FullOpen = $true }
+            if ($cd.ShowDialog() -eq [Windows.Forms.DialogResult]::OK) {
+                $sender.BackColor = $cd.Color
+            }
+            $cd.Dispose()
+        })
+
+        $colorButtons[$entry.key] = $btn
+        $colorLabels[$entry.key]  = $lbl
+        $dlg.Controls.Add($btn)
+        $dlg.Controls.Add($lbl)
+        $y += 28
+    }
+
+    # Enable/disable custom color controls when preset changes
+    $updateCustomState = {
+        $isCustom = $rbCustom.Checked
+        $lblCustom.ForeColor = if ($isCustom) { $T.TextPrimary } else { $T.TextDim }
+        foreach ($k in @("low", "mid", "high", "exhausted")) {
+            $colorButtons[$k].Enabled   = $isCustom
+            $colorLabels[$k].ForeColor  = if ($isCustom) { $T.TextPrimary } else { $T.TextDim }
+        }
+    }
+    $rbDefault.Add_CheckedChanged($updateCustomState)
+    $rbColorblind.Add_CheckedChanged($updateCustomState)
+    $rbCustom.Add_CheckedChanged($updateCustomState)
+
+    $y += 12
+
+    # --- Bottom buttons ---
+    $btnRestore = [Windows.Forms.Button]@{
+        Text      = "Restore Defaults"
+        Location  = [Drawing.Point]::new(12, $y)
+        Size      = [Drawing.Size]::new(120, 28)
+        FlatStyle = 'Flat'
+        BackColor = $T.ButtonBg
+        ForeColor = $T.TextPrimary
+        Font      = [Drawing.Font]::new("Segoe UI", 9)
+    }
+    $btnOK = [Windows.Forms.Button]@{
+        Text         = "OK"
+        DialogResult = [Windows.Forms.DialogResult]::OK
+        Location     = [Drawing.Point]::new(163, $y)
+        Size         = [Drawing.Size]::new(70, 28)
+        FlatStyle    = 'Flat'
+        BackColor    = $T.ButtonBg
+        ForeColor    = $T.TextPrimary
+        Font         = [Drawing.Font]::new("Segoe UI", 9)
+    }
+    $btnCancel = [Windows.Forms.Button]@{
+        Text         = "Cancel"
+        DialogResult = [Windows.Forms.DialogResult]::Cancel
+        Location     = [Drawing.Point]::new(240, $y)
+        Size         = [Drawing.Size]::new(70, 28)
+        FlatStyle    = 'Flat'
+        BackColor    = $T.ButtonBg
+        ForeColor    = $T.TextPrimary
+        Font         = [Drawing.Font]::new("Segoe UI", 9)
+    }
+
+    $btnRestore.Add_Click({
+        $rbDark.Checked    = $true
+        $rbDefault.Checked = $true
+        $def = $Script:DefaultSettings
+        $colorButtons['low'].BackColor       = Color-FromHex $def.customColors.low
+        $colorButtons['mid'].BackColor       = Color-FromHex $def.customColors.mid
+        $colorButtons['high'].BackColor      = Color-FromHex $def.customColors.high
+        $colorButtons['exhausted'].BackColor = Color-FromHex $def.customColors.exhausted
+    })
+
+    $dlg.AcceptButton = $btnOK
+    $dlg.CancelButton = $btnCancel
+    foreach ($c in @($lblMode, $modePanel, $lblPreset, $presetPanel, $lblCustom, $btnRestore, $btnOK, $btnCancel)) {
+        $dlg.Controls.Add($c)
+    }
+
+    $result = $dlg.ShowDialog()
+
+    if ($result -eq [Windows.Forms.DialogResult]::OK) {
+        $mode   = if ($rbLight.Checked) { "light" } else { "dark" }
+        $preset = if ($rbColorblind.Checked) { "colorblind" }
+                  elseif ($rbCustom.Checked) { "custom" }
+                  else { "default" }
+        $Script:Settings = @{
+            mode         = $mode
+            colorPreset  = $preset
+            customColors = @{
+                low       = Color-ToHex $colorButtons['low'].BackColor
+                mid       = Color-ToHex $colorButtons['mid'].BackColor
+                high      = Color-ToHex $colorButtons['high'].BackColor
+                exhausted = Color-ToHex $colorButtons['exhausted'].BackColor
+            }
+        }
+        Save-Config
+        Apply-Settings
+        $dlg.Dispose()
+        return $true
+    }
+
+    $dlg.Dispose()
+    return $false
+}
+
 # ------------ Launcher view ------------
 
 function Show-Launcher {
-    # Returns $true if user clicked Start Monitoring, $false if closed the window
+    # Returns "monitor" if Start clicked, "reopen" if settings changed, $null if closed
 
-    $Script:StartMonitoring = $false
+    $Script:LauncherResult = $null
+    $T = $Script:Theme
 
     $form = [Windows.Forms.Form]@{
         Text            = "Claude Usage Monitor"
         FormBorderStyle = 'FixedSingle'
         MaximizeBox     = $false
         StartPosition   = 'CenterScreen'
-        BackColor       = [Drawing.Color]::FromArgb(22, 22, 22)
-        ForeColor       = [Drawing.Color]::White
+        BackColor       = $T.FormBg
+        ForeColor       = $T.TextPrimary
         ClientSize      = [Drawing.Size]::new(320, 310)
     }
 
@@ -381,15 +769,15 @@ function Show-Launcher {
         Location  = [Drawing.Point]::new(12, 48)
         Size      = [Drawing.Size]::new(296, 18)
         Font      = [Drawing.Font]::new("Segoe UI", 9)
-        ForeColor = [Drawing.Color]::Silver
+        ForeColor = $T.TextSecondary
     }
 
     $listBox = [Windows.Forms.ListBox]@{
         Location    = [Drawing.Point]::new(12, 70)
         Size        = [Drawing.Size]::new(296, 140)
         Font        = [Drawing.Font]::new("Segoe UI", 10)
-        BackColor   = [Drawing.Color]::FromArgb(36, 36, 36)
-        ForeColor   = [Drawing.Color]::White
+        BackColor   = $T.PanelBg
+        ForeColor   = $T.TextPrimary
         BorderStyle = 'FixedSingle'
     }
     foreach ($acct in $Script:Accounts) { $listBox.Items.Add($acct.name) }
@@ -399,8 +787,8 @@ function Show-Launcher {
         Location  = [Drawing.Point]::new(12, 220)
         Size      = [Drawing.Size]::new(100, 28)
         FlatStyle = 'Flat'
-        BackColor = [Drawing.Color]::FromArgb(48, 48, 48)
-        ForeColor = [Drawing.Color]::White
+        BackColor = $T.ButtonBg
+        ForeColor = $T.TextPrimary
         Font      = [Drawing.Font]::new("Segoe UI", 9)
     }
 
@@ -409,10 +797,20 @@ function Show-Launcher {
         Location  = [Drawing.Point]::new(120, 220)
         Size      = [Drawing.Size]::new(80, 28)
         FlatStyle = 'Flat'
-        BackColor = [Drawing.Color]::FromArgb(48, 48, 48)
-        ForeColor = [Drawing.Color]::White
+        BackColor = $T.ButtonBg
+        ForeColor = $T.TextPrimary
         Font      = [Drawing.Font]::new("Segoe UI", 9)
         Enabled   = $false
+    }
+
+    $btnSettings = [Windows.Forms.Button]@{
+        Text      = "Settings"
+        Location  = [Drawing.Point]::new(208, 220)
+        Size      = [Drawing.Size]::new(100, 28)
+        FlatStyle = 'Flat'
+        BackColor = $T.ButtonBg
+        ForeColor = $T.TextPrimary
+        Font      = [Drawing.Font]::new("Segoe UI", 9)
     }
 
     $btnStart = [Windows.Forms.Button]@{
@@ -420,8 +818,8 @@ function Show-Launcher {
         Location  = [Drawing.Point]::new(12, 264)
         Size      = [Drawing.Size]::new(296, 34)
         FlatStyle = 'Flat'
-        BackColor = [Drawing.Color]::FromArgb(0, 120, 80)
-        ForeColor = [Drawing.Color]::White
+        BackColor = $T.StartButtonBg
+        ForeColor = $T.StartButtonFg
         Font      = [Drawing.Font]::new("Segoe UI", 10, [Drawing.FontStyle]::Bold)
         Enabled   = ($Script:Accounts.Count -gt 0)
     }
@@ -432,7 +830,6 @@ function Show-Launcher {
 
     # --- Add Account ---
     $btnAdd.Add_Click({
-        # Ensure Chrome path is valid
         if (-not (Test-Path $Script:ChromePath)) {
             $newPath = Show-InputDialog -Title "Chrome Path" -Prompt "Path to chrome.exe:" -Default $Script:DefaultChrome
             if (-not $newPath) { return }
@@ -467,12 +864,10 @@ function Show-Launcher {
             'Information'
         )
 
-        # Graceful close — let Chrome flush session data to disk
         try {
             $proc.CloseMainWindow() | Out-Null
             $proc.WaitForExit(5000) | Out-Null
         } catch {}
-        # Kill any remaining child processes for this profile
         Kill-ChromeForProfile -Folder $folder | Out-Null
 
         if ($result -ne [Windows.Forms.DialogResult]::OK) { return }
@@ -510,18 +905,27 @@ function Show-Launcher {
         $btnStart.Enabled  = ($Script:Accounts.Count -gt 0)
     })
 
+    # --- Settings ---
+    $btnSettings.Add_Click({
+        $changed = Show-Settings
+        if ($changed) {
+            $Script:LauncherResult = "reopen"
+            $form.Close()
+        }
+    })
+
     # --- Start Monitoring ---
     $btnStart.Add_Click({
-        $Script:StartMonitoring = $true
+        $Script:LauncherResult = "monitor"
         $form.Close()
     })
 
-    foreach ($c in @($lblTitle, $lblAccounts, $listBox, $btnAdd, $btnRemove, $btnStart)) {
+    foreach ($c in @($lblTitle, $lblAccounts, $listBox, $btnAdd, $btnRemove, $btnSettings, $btnStart)) {
         $form.Controls.Add($c)
     }
 
     [Windows.Forms.Application]::Run($form)
-    return $Script:StartMonitoring
+    return $Script:LauncherResult
 }
 
 # ------------ Monitor view ------------
@@ -532,6 +936,7 @@ function Show-Monitor {
     $Script:ReturnToLauncher = $false
     $Script:OwnedProcs.Clear()
 
+    $T = $Script:Theme
     $accounts = $Script:Accounts
     $PAD   = 12
     $ROW_H = 76
@@ -542,8 +947,8 @@ function Show-Monitor {
         FormBorderStyle = 'FixedSingle'
         MaximizeBox     = $false
         TopMost         = $true
-        BackColor       = [Drawing.Color]::FromArgb(22, 22, 22)
-        ForeColor       = [Drawing.Color]::White
+        BackColor       = $T.FormBg
+        ForeColor       = $T.TextPrimary
         StartPosition   = 'Manual'
     }
     $form.ClientSize = [Drawing.Size]::new($W, $PAD + $accounts.Count * $ROW_H + 8 + 28 + 6 + 28 + $PAD)
@@ -566,7 +971,7 @@ function Show-Monitor {
             Size      = [Drawing.Size]::new($W - 2*$PAD, 17)
             Location  = [Drawing.Point]::new($PAD, $y + 24)
             Font      = [Drawing.Font]::new("Segoe UI", 9)
-            ForeColor = [Drawing.Color]::Silver
+            ForeColor = $T.TextSecondary
             Text      = ""
         }
 
@@ -574,7 +979,7 @@ function Show-Monitor {
             Size      = [Drawing.Size]::new($W - 2*$PAD, 17)
             Location  = [Drawing.Point]::new($PAD, $y + 42)
             Font      = [Drawing.Font]::new("Segoe UI", 9)
-            ForeColor = [Drawing.Color]::Silver
+            ForeColor = $T.TextSecondary
             Text      = ""
         }
 
@@ -582,7 +987,7 @@ function Show-Monitor {
             Size      = [Drawing.Size]::new($W - 2*$PAD, 14)
             Location  = [Drawing.Point]::new($PAD, $y + 60)
             Font      = [Drawing.Font]::new("Segoe UI", 7.5)
-            ForeColor = [Drawing.Color]::FromArgb(100, 100, 100)
+            ForeColor = $T.TextMuted
             Text      = ""
         }
 
@@ -592,7 +997,7 @@ function Show-Monitor {
             $sep = [Windows.Forms.Panel]@{
                 Size      = [Drawing.Size]::new($W - 2*$PAD, 1)
                 Location  = [Drawing.Point]::new($PAD, $y + $ROW_H - 2)
-                BackColor = [Drawing.Color]::FromArgb(42, 42, 42)
+                BackColor = $T.SeparatorBg
             }
             $form.Controls.Add($sep)
         }
@@ -607,8 +1012,8 @@ function Show-Monitor {
         Size      = [Drawing.Size]::new(80, 24)
         Location  = [Drawing.Point]::new($PAD, $yBot)
         FlatStyle = 'Flat'
-        BackColor = [Drawing.Color]::FromArgb(48, 48, 48)
-        ForeColor = [Drawing.Color]::White
+        BackColor = $T.ButtonBg
+        ForeColor = $T.TextPrimary
         Font      = [Drawing.Font]::new("Segoe UI", 8)
     }
     $form.Controls.Add($btnRefresh)
@@ -617,7 +1022,7 @@ function Show-Monitor {
         Size      = [Drawing.Size]::new($W - $PAD - 96, 24)
         Location  = [Drawing.Point]::new($PAD + 88, $yBot + 4)
         Font      = [Drawing.Font]::new("Segoe UI", 7.5)
-        ForeColor = [Drawing.Color]::DimGray
+        ForeColor = $T.TextDim
         Text      = ""
     }
     $form.Controls.Add($lblStatus)
@@ -625,12 +1030,12 @@ function Show-Monitor {
     $yBack = $yBot + 34
 
     $btnBack = [Windows.Forms.Button]@{
-        Text      = [char]0x2190 + " Settings"
+        Text      = [char]0x2190 + " Accounts"
         Size      = [Drawing.Size]::new(96, 24)
         Location  = [Drawing.Point]::new($PAD, $yBack)
         FlatStyle = 'Flat'
-        BackColor = [Drawing.Color]::FromArgb(48, 48, 48)
-        ForeColor = [Drawing.Color]::Silver
+        BackColor = $T.ButtonBg
+        ForeColor = $T.TextSecondary
         Font      = [Drawing.Font]::new("Segoe UI", 8)
     }
     $form.Controls.Add($btnBack)
@@ -644,7 +1049,7 @@ function Show-Monitor {
             $pg = Get-UsagePage -Port $accounts[$i].port
             if (-not $pg) {
                 $Rows[$i].H.Text      = "$($accounts[$i].name)  -  Chrome not ready"
-                $Rows[$i].H.ForeColor = [Drawing.Color]::DimGray
+                $Rows[$i].H.ForeColor = $T.TextDim
                 $Rows[$i].S.Text = ""; $Rows[$i].W.Text = ""; $Rows[$i].R.Text = ""
                 continue
             }
@@ -717,10 +1122,14 @@ function Show-Monitor {
 Load-Config
 
 while ($true) {
-    $shouldMonitor = Show-Launcher
-    if (-not $shouldMonitor) { break }
-    $shouldReturn = Show-Monitor
-    if (-not $shouldReturn) { break }
-    # Reload config in case it was edited externally
-    Load-Config
+    $launcherResult = Show-Launcher
+    if ($launcherResult -eq "monitor") {
+        $shouldReturn = Show-Monitor
+        if (-not $shouldReturn) { break }
+        Load-Config
+    } elseif ($launcherResult -eq "reopen") {
+        continue
+    } else {
+        break
+    }
 }
