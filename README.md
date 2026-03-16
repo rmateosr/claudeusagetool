@@ -1,28 +1,27 @@
 # Claude Usage Monitor
 
-Tracks Claude AI usage across multiple accounts in a compact always-on-top popup.
+If you juggle multiple Claude accounts, you've probably lost track of how much usage you have left on each one. This little Windows tool sits in the corner of your screen and tells you at a glance.
 
-**Requires:** Google Chrome installed on Windows.
+It's just a PowerShell script — no installers, no binaries, nothing phoning home. You can read every line of `claude-usage-monitor.ps1` yourself.
 
-## Quick start
+## Getting started
+
+You'll need Google Chrome installed. That's the only dependency.
 
 1. Double-click `Claude_Usage_Monitor.bat`
-2. Click **Add Account** for each Claude account you want to track
-3. Log in when Chrome opens, then click OK
-4. Click **Start Monitoring** — usage stats refresh every 30 seconds
+2. Hit **Add Account** for each Claude account you want to track
+3. A Chrome window opens — log in, then click OK
+4. Hit **Start Monitoring**
 
-## What it does
+That's it. A small always-on-top window shows your usage, color-coded green/orange/red so you can tell at a glance if you're running low. It refreshes every 30 seconds.
 
-- Launches isolated Chrome profiles (one per account) to scrape usage data from `claude.ai/settings/usage`
-- Displays session and weekly usage percentages in a small always-on-top window
-- Color-coded status: green (low usage), orange (moderate), red (near limit)
-- Auto-refreshes every 30 seconds
+Want to add or remove accounts later? Click **Settings** in the monitor window.
+
+## How it works
+
+Behind the scenes, it opens isolated Chrome profiles (one per account) and reads the usage data from your Claude settings page. Nothing clever, nothing fragile — just browser automation with PowerShell.
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `claude-usage-monitor.ps1` | The tool (auditable PowerShell source) |
-| `Claude_Usage_Monitor.bat` | Double-click launcher (handles ExecutionPolicy) |
-
-No binaries, no installers, no dependencies beyond Chrome. Read the `.ps1` to see exactly what it does.
+- **`claude-usage-monitor.ps1`** — the actual tool, fully auditable
+- **`Claude_Usage_Monitor.bat`** — double-click launcher that handles PowerShell's ExecutionPolicy so you don't have to
