@@ -23,5 +23,3 @@ Click **Settings** in the launcher to customize the appearance:
 - **Color presets** — Default, Colorblind-safe, or Custom
 - **Custom colors** — pick your own colors for each usage level (low, mid, high, exhausted)
 - **Restore Defaults** — one click to reset everything
-
-Settings are saved to `config.json` and persist between sessions.
