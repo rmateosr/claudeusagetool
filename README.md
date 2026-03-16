@@ -11,6 +11,17 @@ You'll need Google Chrome installed. That's the only dependency.
 3. A Chrome window opens — log in, then click OK
 4. Hit **Start Monitoring**
 
-A small always-on-top window shows your usage, color-coded green/orange/red so you can tell at a glance if you're running low. It refreshes every 30 seconds.
+A small always-on-top window shows your usage, color-coded by level so you can tell at a glance if you're running low. It refreshes every 30 seconds.
 
-If you want to add or remove accounts later, you can click **Settings** in the monitor window.
+To add or remove accounts later, click **Accounts** in the monitor window.
+
+## Settings
+
+Click **Settings** in the launcher to customize the appearance:
+
+- **Dark / Light mode**
+- **Color presets** — Default, Colorblind-safe, or Custom
+- **Custom colors** — pick your own colors for each usage level (low, mid, high, exhausted)
+- **Restore Defaults** — one click to reset everything
+
+Settings are saved to `config.json` and persist between sessions.
