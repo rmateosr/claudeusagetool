@@ -2,8 +2,6 @@
 
 If you juggle multiple Claude accounts, you've probably lost track of how much usage you have left on each one. This little Windows tool sits in the corner of your screen and tells you at a glance.
 
-It's just a PowerShell script — no installers, no binaries, nothing phoning home. You can read every line of `claude-usage-monitor.ps1` yourself.
-
 ## Getting started
 
 You'll need Google Chrome installed. That's the only dependency.
@@ -13,15 +11,6 @@ You'll need Google Chrome installed. That's the only dependency.
 3. A Chrome window opens — log in, then click OK
 4. Hit **Start Monitoring**
 
-That's it. A small always-on-top window shows your usage, color-coded green/orange/red so you can tell at a glance if you're running low. It refreshes every 30 seconds.
+A small always-on-top window shows your usage, color-coded green/orange/red so you can tell at a glance if you're running low. It refreshes every 30 seconds.
 
-Want to add or remove accounts later? Click **Settings** in the monitor window.
-
-## How it works
-
-Behind the scenes, it opens isolated Chrome profiles (one per account) and reads the usage data from your Claude settings page. Nothing clever, nothing fragile — just browser automation with PowerShell.
-
-## Files
-
-- **`claude-usage-monitor.ps1`** — the actual tool, fully auditable
-- **`Claude_Usage_Monitor.bat`** — double-click launcher that handles PowerShell's ExecutionPolicy so you don't have to
+If you want to add or remove accounts later, you can click **Settings** in the monitor window.
