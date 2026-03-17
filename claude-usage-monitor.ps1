@@ -48,9 +48,10 @@ $Script:Theme         = $null
 # ------------ Theme infrastructure ------------
 
 $Script:DefaultSettings = @{
-    mode         = "dark"
-    colorPreset  = "default"
-    customColors = @{
+    mode           = "dark"
+    colorPreset    = "default"
+    refreshSeconds = 30
+    customColors   = @{
         low       = "#32CD32"
         mid       = "#FFA500"
         high      = "#FF4500"
@@ -90,9 +91,10 @@ function Color-ToHex {
 function Copy-DefaultSettings {
     $d = $Script:DefaultSettings
     return @{
-        mode         = $d.mode
-        colorPreset  = $d.colorPreset
-        customColors = @{
+        mode           = $d.mode
+        colorPreset    = $d.colorPreset
+        refreshSeconds = $d.refreshSeconds
+        customColors   = @{
             low       = $d.customColors.low
             mid       = $d.customColors.mid
             high      = $d.customColors.high
@@ -179,9 +181,10 @@ function Load-Config {
         if ($raw.settings) {
             $s = $raw.settings
             $Script:Settings = @{
-                mode         = if ($s.mode) { $s.mode } else { "dark" }
-                colorPreset  = if ($s.colorPreset) { $s.colorPreset } else { "default" }
-                customColors = @{
+                mode           = if ($s.mode) { $s.mode } else { "dark" }
+                colorPreset    = if ($s.colorPreset) { $s.colorPreset } else { "default" }
+                refreshSeconds = if ($s.refreshSeconds) { [int]$s.refreshSeconds } else { 30 }
+                customColors   = @{
                     low       = if ($s.customColors -and $s.customColors.low) { $s.customColors.low } else { "#32CD32" }
                     mid       = if ($s.customColors -and $s.customColors.mid) { $s.customColors.mid } else { "#FFA500" }
                     high      = if ($s.customColors -and $s.customColors.high) { $s.customColors.high } else { "#FF4500" }
@@ -206,9 +209,10 @@ function Save-Config {
         profilesRoot = $Script:ProfilesRoot
         accounts     = @($Script:Accounts)
         settings     = [ordered]@{
-            mode         = $Script:Settings.mode
-            colorPreset  = $Script:Settings.colorPreset
-            customColors = [ordered]@{
+            mode           = $Script:Settings.mode
+            colorPreset    = $Script:Settings.colorPreset
+            refreshSeconds = $Script:Settings.refreshSeconds
+            customColors   = [ordered]@{
                 low       = $Script:Settings.customColors.low
                 mid       = $Script:Settings.customColors.mid
                 high      = $Script:Settings.customColors.high
@@ -513,7 +517,7 @@ function Show-Settings {
         StartPosition   = 'CenterScreen'
         BackColor       = $T.FormBg
         ForeColor       = $T.TextPrimary
-        ClientSize      = [Drawing.Size]::new(320, 360)
+        ClientSize      = [Drawing.Size]::new(320, 420)
     }
 
     # --- Mode section ---
@@ -549,6 +553,32 @@ function Show-Settings {
     }
     $modePanel.Controls.Add($rbDark)
     $modePanel.Controls.Add($rbLight)
+    $y += 36
+
+    # --- Refresh Interval section ---
+    $lblRefresh = [Windows.Forms.Label]@{
+        Text     = "Refresh Interval"
+        Location = [Drawing.Point]::new(12, $y)
+        Size     = [Drawing.Size]::new(296, 20)
+        Font     = [Drawing.Font]::new("Segoe UI", 10, [Drawing.FontStyle]::Bold)
+    }
+    $y += 24
+
+    $txtRefresh = [Windows.Forms.TextBox]@{
+        Text      = "$($Script:Settings.refreshSeconds)"
+        Location  = [Drawing.Point]::new(20, $y)
+        Size      = [Drawing.Size]::new(60, 24)
+        Font      = [Drawing.Font]::new("Segoe UI", 9)
+        BackColor = $T.InputBg
+        ForeColor = $T.TextPrimary
+    }
+    $lblRefreshUnit = [Windows.Forms.Label]@{
+        Text      = "seconds  (minimum: 10)"
+        Location  = [Drawing.Point]::new(86, $y + 3)
+        Size      = [Drawing.Size]::new(220, 20)
+        Font      = [Drawing.Font]::new("Segoe UI", 9)
+        ForeColor = $T.TextSecondary
+    }
     $y += 36
 
     # --- Color Preset section ---
@@ -699,6 +729,7 @@ function Show-Settings {
     $btnRestore.Add_Click({
         $rbDark.Checked    = $true
         $rbDefault.Checked = $true
+        $txtRefresh.Text   = "30"
         $def = $Script:DefaultSettings
         $colorButtons['low'].BackColor       = Color-FromHex $def.customColors.low
         $colorButtons['mid'].BackColor       = Color-FromHex $def.customColors.mid
@@ -708,7 +739,7 @@ function Show-Settings {
 
     $dlg.AcceptButton = $btnOK
     $dlg.CancelButton = $btnCancel
-    foreach ($c in @($lblMode, $modePanel, $lblPreset, $presetPanel, $lblCustom, $btnRestore, $btnOK, $btnCancel)) {
+    foreach ($c in @($lblMode, $modePanel, $lblRefresh, $txtRefresh, $lblRefreshUnit, $lblPreset, $presetPanel, $lblCustom, $btnRestore, $btnOK, $btnCancel)) {
         $dlg.Controls.Add($c)
     }
 
@@ -719,10 +750,17 @@ function Show-Settings {
         $preset = if ($rbColorblind.Checked) { "colorblind" }
                   elseif ($rbCustom.Checked) { "custom" }
                   else { "default" }
+        $refreshVal = 0
+        if ([int]::TryParse($txtRefresh.Text, [ref]$refreshVal)) {
+            if ($refreshVal -lt 10) { $refreshVal = 10 }
+        } else {
+            $refreshVal = 30
+        }
         $Script:Settings = @{
-            mode         = $mode
-            colorPreset  = $preset
-            customColors = @{
+            mode           = $mode
+            colorPreset    = $preset
+            refreshSeconds = $refreshVal
+            customColors   = @{
                 low       = Color-ToHex $colorButtons['low'].BackColor
                 mid       = Color-ToHex $colorButtons['mid'].BackColor
                 high      = Color-ToHex $colorButtons['high'].BackColor
@@ -742,7 +780,7 @@ function Show-Settings {
 # ------------ Launcher view ------------
 
 function Show-Launcher {
-    # Returns "monitor" if Start clicked, "reopen" if settings changed, $null if closed
+    # Returns "monitor" if Start clicked, $null if closed
 
     $Script:LauncherResult = $null
     $T = $Script:Theme
@@ -785,7 +823,7 @@ function Show-Launcher {
     $btnAdd = [Windows.Forms.Button]@{
         Text      = "Add Account"
         Location  = [Drawing.Point]::new(12, 220)
-        Size      = [Drawing.Size]::new(100, 28)
+        Size      = [Drawing.Size]::new(145, 28)
         FlatStyle = 'Flat'
         BackColor = $T.ButtonBg
         ForeColor = $T.TextPrimary
@@ -794,23 +832,13 @@ function Show-Launcher {
 
     $btnRemove = [Windows.Forms.Button]@{
         Text      = "Remove"
-        Location  = [Drawing.Point]::new(120, 220)
-        Size      = [Drawing.Size]::new(80, 28)
+        Location  = [Drawing.Point]::new(165, 220)
+        Size      = [Drawing.Size]::new(143, 28)
         FlatStyle = 'Flat'
         BackColor = $T.ButtonBg
         ForeColor = $T.TextPrimary
         Font      = [Drawing.Font]::new("Segoe UI", 9)
         Enabled   = $false
-    }
-
-    $btnSettings = [Windows.Forms.Button]@{
-        Text      = "Settings"
-        Location  = [Drawing.Point]::new(208, 220)
-        Size      = [Drawing.Size]::new(100, 28)
-        FlatStyle = 'Flat'
-        BackColor = $T.ButtonBg
-        ForeColor = $T.TextPrimary
-        Font      = [Drawing.Font]::new("Segoe UI", 9)
     }
 
     $btnStart = [Windows.Forms.Button]@{
@@ -905,22 +933,13 @@ function Show-Launcher {
         $btnStart.Enabled  = ($Script:Accounts.Count -gt 0)
     })
 
-    # --- Settings ---
-    $btnSettings.Add_Click({
-        $changed = Show-Settings
-        if ($changed) {
-            $Script:LauncherResult = "reopen"
-            $form.Close()
-        }
-    })
-
     # --- Start Monitoring ---
     $btnStart.Add_Click({
         $Script:LauncherResult = "monitor"
         $form.Close()
     })
 
-    foreach ($c in @($lblTitle, $lblAccounts, $listBox, $btnAdd, $btnRemove, $btnSettings, $btnStart)) {
+    foreach ($c in @($lblTitle, $lblAccounts, $listBox, $btnAdd, $btnRemove, $btnStart)) {
         $form.Controls.Add($c)
     }
 
@@ -1040,6 +1059,17 @@ function Show-Monitor {
     }
     $form.Controls.Add($btnBack)
 
+    $btnSettings = [Windows.Forms.Button]@{
+        Text      = "Settings"
+        Size      = [Drawing.Size]::new(80, 24)
+        Location  = [Drawing.Point]::new($W - $PAD - 80, $yBack)
+        FlatStyle = 'Flat'
+        BackColor = $T.ButtonBg
+        ForeColor = $T.TextSecondary
+        Font      = [Drawing.Font]::new("Segoe UI", 8)
+    }
+    $form.Controls.Add($btnSettings)
+
     # --- Refresh logic ---
 
     $refreshAction = {
@@ -1049,7 +1079,7 @@ function Show-Monitor {
             $pg = Get-UsagePage -Port $accounts[$i].port
             if (-not $pg) {
                 $Rows[$i].H.Text      = "$($accounts[$i].name)  -  Chrome not ready"
-                $Rows[$i].H.ForeColor = $T.TextDim
+                $Rows[$i].H.ForeColor = $Script:Theme.TextDim
                 $Rows[$i].S.Text = ""; $Rows[$i].W.Text = ""; $Rows[$i].R.Text = ""
                 continue
             }
@@ -1071,12 +1101,12 @@ function Show-Monitor {
             $Rows[$i].W.Text = $wLine
             $Rows[$i].R.Text = ""
         }
-        $lblStatus.Text = "$(Get-Date -Format 'HH:mm:ss')  -  auto ${RefreshSeconds}s"
+        $lblStatus.Text = "$(Get-Date -Format 'HH:mm:ss')  -  auto $($Script:Settings.refreshSeconds)s"
     }
 
     # --- Timers ---
 
-    $autoTimer = [Windows.Forms.Timer]@{ Interval = $RefreshSeconds * 1000 }
+    $autoTimer = [Windows.Forms.Timer]@{ Interval = $Script:Settings.refreshSeconds * 1000 }
     $autoTimer.Add_Tick($refreshAction)
 
     $initTimer = [Windows.Forms.Timer]@{ Interval = 8000 }
@@ -1094,6 +1124,39 @@ function Show-Monitor {
     $btnBack.Add_Click({
         $Script:ReturnToLauncher = $true
         $form.Close()
+    })
+
+    $btnSettings.Add_Click({
+        $changed = Show-Settings
+        if ($changed) {
+            # Apply new refresh interval
+            $autoTimer.Interval = $Script:Settings.refreshSeconds * 1000
+
+            # Re-theme all controls
+            $T = $Script:Theme
+            $form.BackColor = $T.FormBg
+            $form.ForeColor = $T.TextPrimary
+            $btnRefresh.BackColor = $T.ButtonBg
+            $btnRefresh.ForeColor = $T.TextPrimary
+            $btnBack.BackColor = $T.ButtonBg
+            $btnBack.ForeColor = $T.TextSecondary
+            $btnSettings.BackColor = $T.ButtonBg
+            $btnSettings.ForeColor = $T.TextSecondary
+            $lblStatus.ForeColor = $T.TextDim
+            foreach ($row in $Rows) {
+                $row.S.ForeColor = $T.TextSecondary
+                $row.W.ForeColor = $T.TextSecondary
+                $row.R.ForeColor = $T.TextMuted
+            }
+            foreach ($ctrl in $form.Controls) {
+                if ($ctrl -is [Windows.Forms.Panel] -and $ctrl.Height -eq 1) {
+                    $ctrl.BackColor = $T.SeparatorBg
+                }
+            }
+
+            # Update status to show new interval
+            $lblStatus.Text = "$(Get-Date -Format 'HH:mm:ss')  -  auto $($Script:Settings.refreshSeconds)s"
+        }
     })
 
     $form.Add_Shown({
