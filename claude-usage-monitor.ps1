@@ -954,6 +954,7 @@ function Show-Monitor {
 
     $Script:ReturnToLauncher = $false
     $Script:OwnedProcs.Clear()
+    $Script:LastPageText = @($null) * $Script:Accounts.Count
 
     $T = $Script:Theme
     $accounts = $Script:Accounts
@@ -1086,6 +1087,7 @@ function Show-Monitor {
             Click-RefreshButton -WsUrl $pg.webSocketDebuggerUrl
             Start-Sleep -Seconds 3
             $txt  = Read-PageText -WsUrl $pg.webSocketDebuggerUrl
+            $Script:LastPageText[$i] = $txt
             Write-Log "$($accounts[$i].name) text (first 500): $($txt.Substring(0, [Math]::Min(500, $txt.Length)))"
             $info = Parse-AccountInfo -Text $txt -Name $accounts[$i].name
 
@@ -1127,6 +1129,9 @@ function Show-Monitor {
     })
 
     $btnSettings.Add_Click({
+        # Pause auto-refresh while settings dialog is open
+        $autoTimer.Stop()
+
         $changed = Show-Settings
         if ($changed) {
             # Apply new refresh interval
@@ -1154,9 +1159,19 @@ function Show-Monitor {
                 }
             }
 
+            # Re-color header rows from cached page text (no network needed)
+            for ($i = 0; $i -lt $accounts.Count; $i++) {
+                $info = Parse-AccountInfo -Text $Script:LastPageText[$i] -Name $accounts[$i].name
+                $Rows[$i].H.Text      = $info.Header
+                $Rows[$i].H.ForeColor = $info.Color
+            }
+
             # Update status to show new interval
             $lblStatus.Text = "$(Get-Date -Format 'HH:mm:ss')  -  auto $($Script:Settings.refreshSeconds)s"
         }
+
+        # Resume auto-refresh
+        $autoTimer.Start()
     })
 
     $form.Add_Shown({
