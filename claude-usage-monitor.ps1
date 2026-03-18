@@ -1087,6 +1087,13 @@ function Show-Monitor {
             Click-RefreshButton -WsUrl $pg.webSocketDebuggerUrl
             Start-Sleep -Seconds 3
             $txt  = Read-PageText -WsUrl $pg.webSocketDebuggerUrl
+            if (-not $txt) {
+                Write-Log "$($accounts[$i].name) Read-PageText returned null"
+                $Rows[$i].H.Text      = "$($accounts[$i].name)  -  Could not read page"
+                $Rows[$i].H.ForeColor = $Script:Theme.TextDim
+                $Rows[$i].S.Text = ""; $Rows[$i].W.Text = ""; $Rows[$i].R.Text = ""
+                continue
+            }
             $Script:LastPageText[$i] = $txt
             Write-Log "$($accounts[$i].name) text (first 500): $($txt.Substring(0, [Math]::Min(500, $txt.Length)))"
             $info = Parse-AccountInfo -Text $txt -Name $accounts[$i].name
